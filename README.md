@@ -1,7 +1,7 @@
-go-socks5 [![Build Status](https://travis-ci.org/armon/go-socks5.png)](https://travis-ci.org/armon/go-socks5)
+go-socks
 =========
 
-Provides the `socks5` package that implements a [SOCKS5 server](http://en.wikipedia.org/wiki/SOCKS).
+Provides the `socks` package that implements a [SOCKS5 server](http://en.wikipedia.org/wiki/SOCKS).
 SOCKS (Secure Sockets) is used to route traffic between a client and server through
 an intermediate proxy layer. This can be used to bypass firewalls or NATs.
 
@@ -30,15 +30,15 @@ Example
 Below is a simple example of usage
 
 ```go
-// Create a SOCKS5 server
-conf := &socks5.Config{}
+// Create a SOCKS server
+conf := &socks.Config{}
 server, err := socks5.New(conf)
 if err != nil {
   panic(err)
 }
 
-// Create SOCKS5 proxy on localhost port 8000
-if err := server.ListenAndServe("tcp", "127.0.0.1:8000"); err != nil {
+// Create SOCKS proxy on localhost port 1080
+if err := server.ListenAndServe("tcp", "127.0.0.1:1080"); err != nil {
   panic(err)
 }
 ```
