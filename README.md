@@ -1,7 +1,9 @@
 # go-socks
 
-This is a fork of the unmaintained https://github.com/armon/go-socks5 repository
+This is a fork of the unmaintained https://github.com/armon/go-socks5 repository.
+
 It adds support for:
+* go modules
 * socks4
 * socks4a
 
