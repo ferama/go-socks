@@ -1,12 +1,10 @@
-go-socks
-=========
+# go-socks
 
-Provides the `socks` package that implements a [SOCKS5 server](http://en.wikipedia.org/wiki/SOCKS).
+Provides the `socks` package that implements a [SOCKS server](http://en.wikipedia.org/wiki/SOCKS).
 SOCKS (Secure Sockets) is used to route traffic between a client and server through
 an intermediate proxy layer. This can be used to bypass firewalls or NATs.
 
-Feature
-=======
+## Feature
 
 The package has the following features:
 * "No Auth" mode
@@ -16,23 +14,21 @@ The package has the following features:
 * Custom DNS resolution
 * Unit tests
 
-TODO
-====
+## TODO
 
 The package still needs the following:
 * Support for the BIND command
 * Support for the ASSOCIATE command
 
 
-Example
-=======
+## Example
 
 Below is a simple example of usage
 
 ```go
 // Create a SOCKS server
 conf := &socks.Config{}
-server, err := socks5.New(conf)
+server, err := socks.New(conf)
 if err != nil {
   panic(err)
 }

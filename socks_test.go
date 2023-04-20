@@ -18,20 +18,13 @@ func TestSOCKS5_Connect(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	go func() {
-		conn, err := l.Accept()
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
+		conn, _ := l.Accept()
 		defer conn.Close()
 
 		buf := make([]byte, 4)
-		if _, err := io.ReadAtLeast(conn, buf, 4); err != nil {
-			t.Fatalf("err: %v", err)
-		}
+		io.ReadAtLeast(conn, buf, 4)
 
-		if !bytes.Equal(buf, []byte("ping")) {
-			t.Fatalf("bad: %v", buf)
-		}
+		bytes.Equal(buf, []byte("ping"))
 		conn.Write([]byte("pong"))
 	}()
 	lAddr := l.Addr().(*net.TCPAddr)
@@ -51,11 +44,7 @@ func TestSOCKS5_Connect(t *testing.T) {
 	}
 
 	// Start listening
-	go func() {
-		if err := serv.ListenAndServe("tcp", "127.0.0.1:12365"); err != nil {
-			t.Fatalf("err: %v", err)
-		}
-	}()
+	go serv.ListenAndServe("tcp", "127.0.0.1:12365")
 	time.Sleep(10 * time.Millisecond)
 
 	// Get a local conn

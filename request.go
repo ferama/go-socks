@@ -115,12 +115,12 @@ func NewRequest(bufConn io.Reader, reqVersion byte) (*Request, error) {
 		header := []byte{0}
 		// Read the command byte
 		if _, err := io.ReadAtLeast(bufConn, header, 1); err != nil {
-			return nil, fmt.Errorf("Failed to get command: %v", err)
+			return nil, fmt.Errorf("failed to get command: %v", err)
 		}
 
 		// Ensure we are compatible
 		if header[0] != 1 {
-			return nil, fmt.Errorf("Unsupported command: %v", header[0])
+			return nil, fmt.Errorf("unsupported command: %v", header[0])
 		}
 		request.Command = header[0]
 
@@ -134,7 +134,7 @@ func NewRequest(bufConn io.Reader, reqVersion byte) (*Request, error) {
 		authStr := make([]byte, 256)
 		n, err := io.ReadAtLeast(bufConn, authStr, 1)
 		if err != nil {
-			return nil, fmt.Errorf("Failed to get auth string: %v", err)
+			return nil, fmt.Errorf("failed to get auth string: %v", err)
 		}
 
 		if n > 0 {
@@ -248,13 +248,11 @@ func (s *Server) handleConnect(ctx context.Context, conn conn, req *Request) err
 // handleBind is used to handle a connect command
 func (s *Server) handleBind(ctx context.Context, conn conn, req *Request) error {
 	// Check if this is allowed
-	if ctx_, ok := s.config.Rules.Allow(ctx, req); !ok {
+	if _, ok := s.config.Rules.Allow(ctx, req); !ok {
 		if err := sendReply(conn, ruleFailure, nil, req.Version); err != nil {
 			return fmt.Errorf("failed to send reply: %v", err)
 		}
 		return fmt.Errorf("bind to %v blocked by rules", req.DestAddr)
-	} else {
-		ctx = ctx_
 	}
 
 	// TODO: Support bind
@@ -267,13 +265,11 @@ func (s *Server) handleBind(ctx context.Context, conn conn, req *Request) error 
 // handleAssociate is used to handle a connect command
 func (s *Server) handleAssociate(ctx context.Context, conn conn, req *Request) error {
 	// Check if this is allowed
-	if ctx_, ok := s.config.Rules.Allow(ctx, req); !ok {
+	if _, ok := s.config.Rules.Allow(ctx, req); !ok {
 		if err := sendReply(conn, ruleFailure, nil, req.Version); err != nil {
 			return fmt.Errorf("failed to send reply: %v", err)
 		}
 		return fmt.Errorf("associate to %v blocked by rules", req.DestAddr)
-	} else {
-		ctx = ctx_
 	}
 
 	// TODO: Support associate
