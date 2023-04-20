@@ -87,29 +87,61 @@ type conn interface {
 }
 
 // NewRequest creates a new Request from the tcp connection
-func NewRequest(bufConn io.Reader) (*Request, error) {
-	// Read the version byte
-	header := []byte{0, 0, 0}
-	if _, err := io.ReadAtLeast(bufConn, header, 3); err != nil {
-		return nil, fmt.Errorf("failed to get command version: %v", err)
-	}
-
-	// Ensure we are compatible
-	if header[0] != socks5Version {
-		return nil, fmt.Errorf("unsupported command version: %v", header[0])
-	}
-
-	// Read in the destination address
-	dest, err := readAddrSpec(bufConn)
-	if err != nil {
-		return nil, err
-	}
-
+func NewRequest(bufConn io.Reader, reqVersion byte) (*Request, error) {
 	request := &Request{
-		Version:  socks5Version,
-		Command:  header[1],
-		DestAddr: dest,
-		bufConn:  bufConn,
+		Version: reqVersion,
+		bufConn: bufConn,
+	}
+	switch reqVersion {
+	case socks5Version:
+		// Read the version byte
+		header := []byte{0, 0, 0}
+		if _, err := io.ReadAtLeast(bufConn, header, 3); err != nil {
+			return nil, fmt.Errorf("failed to get command version: %v", err)
+		}
+
+		// Ensure we are compatible
+		if header[0] != socks5Version {
+			return nil, fmt.Errorf("unsupported command version: %v", header[0])
+		}
+		request.Command = header[1]
+		var err error
+		// Read in the destination address
+		request.DestAddr, err = readAddrSpec(bufConn)
+		if err != nil {
+			return nil, err
+		}
+	case socks4Version:
+		header := []byte{0}
+		// Read the command byte
+		if _, err := io.ReadAtLeast(bufConn, header, 1); err != nil {
+			return nil, fmt.Errorf("Failed to get command: %v", err)
+		}
+
+		// Ensure we are compatible
+		if header[0] != 1 {
+			return nil, fmt.Errorf("Unsupported command: %v", header[0])
+		}
+		request.Command = header[0]
+
+		var err error
+		// Read in the destination address
+		request.DestAddr, err = readAddrSpecv4(bufConn)
+		if err != nil {
+			return nil, err
+		}
+
+		authStr := make([]byte, 256)
+		n, err := io.ReadAtLeast(bufConn, authStr, 1)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to get auth string: %v", err)
+		}
+
+		if n > 0 {
+			request.AuthContext = &AuthContext{UserPassAuth, map[string]string{"Username": string(authStr[:n-1])}}
+		}
+	default:
+		return nil, fmt.Errorf("unsupported socks version: %d", reqVersion)
 	}
 
 	return request, nil
@@ -124,7 +156,7 @@ func (s *Server) handleRequest(req *Request, conn conn) error {
 	if dest.FQDN != "" {
 		ctx_, addr, err := s.config.Resolver.Resolve(ctx, dest.FQDN)
 		if err != nil {
-			if err := sendReply(conn, hostUnreachable, nil); err != nil {
+			if err := sendReply(conn, hostUnreachable, nil, req.Version); err != nil {
 				return fmt.Errorf("failed to send reply: %v", err)
 			}
 			return fmt.Errorf("failed to resolve destination '%v': %v", dest.FQDN, err)
@@ -148,7 +180,7 @@ func (s *Server) handleRequest(req *Request, conn conn) error {
 	case AssociateCommand:
 		return s.handleAssociate(ctx, conn, req)
 	default:
-		if err := sendReply(conn, commandNotSupported, nil); err != nil {
+		if err := sendReply(conn, commandNotSupported, nil, req.Version); err != nil {
 			return fmt.Errorf("failed to send reply: %v", err)
 		}
 		return fmt.Errorf("unsupported command: %v", req.Command)
@@ -159,7 +191,7 @@ func (s *Server) handleRequest(req *Request, conn conn) error {
 func (s *Server) handleConnect(ctx context.Context, conn conn, req *Request) error {
 	// Check if this is allowed
 	if ctx_, ok := s.config.Rules.Allow(ctx, req); !ok {
-		if err := sendReply(conn, ruleFailure, nil); err != nil {
+		if err := sendReply(conn, ruleFailure, nil, req.Version); err != nil {
 			return fmt.Errorf("failed to send reply: %v", err)
 		}
 		return fmt.Errorf("connect to %v blocked by rules", req.DestAddr)
@@ -183,7 +215,7 @@ func (s *Server) handleConnect(ctx context.Context, conn conn, req *Request) err
 		} else if strings.Contains(msg, "network is unreachable") {
 			resp = networkUnreachable
 		}
-		if err := sendReply(conn, resp, nil); err != nil {
+		if err := sendReply(conn, resp, nil, req.Version); err != nil {
 			return fmt.Errorf("failed to send reply: %v", err)
 		}
 		return fmt.Errorf("connect to %v failed: %v", req.DestAddr, err)
@@ -193,7 +225,7 @@ func (s *Server) handleConnect(ctx context.Context, conn conn, req *Request) err
 	// Send success
 	local := target.LocalAddr().(*net.TCPAddr)
 	bind := AddrSpec{IP: local.IP, Port: local.Port}
-	if err := sendReply(conn, successReply, &bind); err != nil {
+	if err := sendReply(conn, successReply, &bind, req.Version); err != nil {
 		return fmt.Errorf("failed to send reply: %v", err)
 	}
 
@@ -217,7 +249,7 @@ func (s *Server) handleConnect(ctx context.Context, conn conn, req *Request) err
 func (s *Server) handleBind(ctx context.Context, conn conn, req *Request) error {
 	// Check if this is allowed
 	if ctx_, ok := s.config.Rules.Allow(ctx, req); !ok {
-		if err := sendReply(conn, ruleFailure, nil); err != nil {
+		if err := sendReply(conn, ruleFailure, nil, req.Version); err != nil {
 			return fmt.Errorf("failed to send reply: %v", err)
 		}
 		return fmt.Errorf("bind to %v blocked by rules", req.DestAddr)
@@ -226,7 +258,7 @@ func (s *Server) handleBind(ctx context.Context, conn conn, req *Request) error 
 	}
 
 	// TODO: Support bind
-	if err := sendReply(conn, commandNotSupported, nil); err != nil {
+	if err := sendReply(conn, commandNotSupported, nil, req.Version); err != nil {
 		return fmt.Errorf("failed to send reply: %v", err)
 	}
 	return nil
@@ -236,7 +268,7 @@ func (s *Server) handleBind(ctx context.Context, conn conn, req *Request) error 
 func (s *Server) handleAssociate(ctx context.Context, conn conn, req *Request) error {
 	// Check if this is allowed
 	if ctx_, ok := s.config.Rules.Allow(ctx, req); !ok {
-		if err := sendReply(conn, ruleFailure, nil); err != nil {
+		if err := sendReply(conn, ruleFailure, nil, req.Version); err != nil {
 			return fmt.Errorf("failed to send reply: %v", err)
 		}
 		return fmt.Errorf("associate to %v blocked by rules", req.DestAddr)
@@ -245,7 +277,7 @@ func (s *Server) handleAssociate(ctx context.Context, conn conn, req *Request) e
 	}
 
 	// TODO: Support associate
-	if err := sendReply(conn, commandNotSupported, nil); err != nil {
+	if err := sendReply(conn, commandNotSupported, nil, req.Version); err != nil {
 		return fmt.Errorf("failed to send reply: %v", err)
 	}
 	return nil
@@ -303,46 +335,82 @@ func readAddrSpec(r io.Reader) (*AddrSpec, error) {
 	return d, nil
 }
 
-// sendReply is used to send a reply message
-func sendReply(w io.Writer, resp uint8, addr *AddrSpec) error {
-	// Format the address
-	var addrType uint8
-	var addrBody []byte
-	var addrPort uint16
-	switch {
-	case addr == nil:
-		addrType = ipv4Address
-		addrBody = []byte{0, 0, 0, 0}
-		addrPort = 0
+// Expects port, follwed by the address
+func readAddrSpecv4(r io.Reader) (*AddrSpec, error) {
+	d := &AddrSpec{}
 
-	case addr.FQDN != "":
-		addrType = fqdnAddress
-		addrBody = append([]byte{byte(len(addr.FQDN))}, addr.FQDN...)
-		addrPort = uint16(addr.Port)
-
-	case addr.IP.To4() != nil:
-		addrType = ipv4Address
-		addrBody = []byte(addr.IP.To4())
-		addrPort = uint16(addr.Port)
-
-	case addr.IP.To16() != nil:
-		addrType = ipv6Address
-		addrBody = []byte(addr.IP.To16())
-		addrPort = uint16(addr.Port)
-
-	default:
-		return fmt.Errorf("failed to format address: %v", addr)
+	// Read the port
+	port := []byte{0, 0}
+	if _, err := io.ReadAtLeast(r, port, 2); err != nil {
+		return nil, err
 	}
+	d.Port = (int(port[0]) << 8) | int(port[1])
 
-	// Format the message
-	msg := make([]byte, 6+len(addrBody))
-	msg[0] = socks5Version
-	msg[1] = resp
-	msg[2] = 0 // Reserved
-	msg[3] = addrType
-	copy(msg[4:], addrBody)
-	msg[4+len(addrBody)] = byte(addrPort >> 8)
-	msg[4+len(addrBody)+1] = byte(addrPort & 0xff)
+	addr := []byte{0, 0, 0, 0}
+	if _, err := io.ReadAtLeast(r, addr, 4); err != nil {
+		return nil, err
+	}
+	d.IP = net.IP(addr)
+
+	return d, nil
+}
+
+// sendReply is used to send a reply message
+func sendReply(w io.Writer, resp uint8, addr *AddrSpec, version byte) error {
+	var msg []byte
+	switch version {
+	case socks5Version:
+		// Format the address
+		var addrType uint8
+		var addrBody []byte
+		var addrPort uint16
+		switch {
+		case addr == nil:
+			addrType = ipv4Address
+			addrBody = []byte{0, 0, 0, 0}
+			addrPort = 0
+
+		case addr.FQDN != "":
+			addrType = fqdnAddress
+			addrBody = append([]byte{byte(len(addr.FQDN))}, addr.FQDN...)
+			addrPort = uint16(addr.Port)
+
+		case addr.IP.To4() != nil:
+			addrType = ipv4Address
+			addrBody = []byte(addr.IP.To4())
+			addrPort = uint16(addr.Port)
+
+		case addr.IP.To16() != nil:
+			addrType = ipv6Address
+			addrBody = []byte(addr.IP.To16())
+			addrPort = uint16(addr.Port)
+
+		default:
+			return fmt.Errorf("failed to format address: %v", addr)
+		}
+
+		// Format the message
+		msg = make([]byte, 6+len(addrBody))
+		msg[0] = socks5Version
+		msg[1] = resp
+		msg[2] = 0 // Reserved
+		msg[3] = addrType
+		copy(msg[4:], addrBody)
+		msg[4+len(addrBody)] = byte(addrPort >> 8)
+		msg[4+len(addrBody)+1] = byte(addrPort & 0xff)
+
+	case socks4Version:
+		msg = make([]byte, 8)
+		msg[0] = 0
+		if resp == successReply {
+			msg[1] = 0x5a
+		} else {
+			msg[1] = 0x5b
+		}
+		// bytes 3-8 are reserved
+	default:
+		return fmt.Errorf("unsupported socks version: %d", version)
+	}
 
 	// Send the message
 	_, err := w.Write(msg)

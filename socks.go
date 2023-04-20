@@ -12,6 +12,7 @@ import (
 
 const (
 	socks5Version = uint8(5)
+	socks4Version = uint8(4)
 )
 
 // Config is used to setup and configure a Server
@@ -112,7 +113,12 @@ func (s *Server) Serve(l net.Listener) error {
 		if err != nil {
 			return err
 		}
-		go s.ServeConn(conn)
+		go func() {
+			err := s.ServeConn(conn)
+			if err != nil {
+				s.config.Logger.Printf("%s", err)
+			}
+		}()
 	}
 }
 
@@ -129,30 +135,42 @@ func (s *Server) ServeConn(conn net.Conn) error {
 	}
 
 	// Ensure we are compatible
-	if version[0] != socks5Version {
+	if version[0] != socks5Version && version[0] != socks4Version {
 		err := fmt.Errorf("unsupported SOCKS version: %v", version)
 		s.config.Logger.Printf("[ERR] socks: %v", err)
 		return err
 	}
 
+	socksVersion := version[0]
+
 	// Authenticate the connection
-	authContext, err := s.authenticate(conn, bufConn)
-	if err != nil {
-		err = fmt.Errorf("failed to authenticate: %v", err)
-		s.config.Logger.Printf("[ERR] socks: %v", err)
-		return err
+	var authContext *AuthContext
+
+	if socksVersion == socks5Version {
+		var err error
+		// Authenticate the connection
+		authContext, err = s.authenticate(conn, bufConn)
+		if err != nil {
+			err = fmt.Errorf("failed to authenticate: %v", err)
+			s.config.Logger.Printf("[ERR] socks: %v", err)
+			return err
+		}
 	}
 
-	request, err := NewRequest(bufConn)
+	request, err := NewRequest(bufConn, socksVersion)
 	if err != nil {
 		if err == ErrUnrecognizedAddrType {
-			if err := sendReply(conn, addrTypeNotSupported, nil); err != nil {
+			if err := sendReply(conn, addrTypeNotSupported, nil, socksVersion); err != nil {
 				return fmt.Errorf("failed to send reply: %v", err)
 			}
 		}
 		return fmt.Errorf("failed to read destination address: %v", err)
 	}
-	request.AuthContext = authContext
+
+	if socksVersion == socks5Version {
+		request.AuthContext = authContext
+	}
+
 	if client, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
 		request.RemoteAddr = &AddrSpec{IP: client.IP, Port: client.Port}
 	}
