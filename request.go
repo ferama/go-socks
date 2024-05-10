@@ -164,7 +164,7 @@ func (s *Server) handleRequest(req *Request, conn net.Conn) error {
 
 	// Resolve the address if we have a FQDN
 	dest := req.DestAddr
-	if dest.FQDN != "" {
+	if dest.FQDN != "" && s.config.Resolver != nil {
 		ctx_, addr, err := s.config.Resolver.Resolve(ctx, dest.FQDN)
 		if err != nil {
 			if err := sendReply(conn, hostUnreachable, nil, req.Version); err != nil {

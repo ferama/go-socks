@@ -72,11 +72,6 @@ func New(conf *Config) (*Server, error) {
 		}
 	}
 
-	// Ensure we have a DNS resolver
-	if conf.Resolver == nil {
-		conf.Resolver = DNSResolver{}
-	}
-
 	// Ensure we have a rule set
 	if conf.Rules == nil {
 		conf.Rules = PermitAll()
