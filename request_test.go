@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/net/context"
 )
 
 type MockConn struct {
@@ -159,5 +161,99 @@ func TestRequest_Connect_RuleFail(t *testing.T) {
 
 	if !bytes.Equal(out, expected) {
 		t.Fatalf("bad: %v %v", out, expected)
+	}
+}
+
+func TestHandleAssociate_Closure(t *testing.T) {
+	s, _ := New(&Config{})
+
+	// Create a pipe to simulate a connection
+	client, server := net.Pipe()
+
+	req := &Request{
+		Version: socks5Version,
+		Command: AssociateCommand,
+		DestAddr: &AddrSpec{
+			IP:   net.ParseIP("127.0.0.1"),
+			Port: 1234,
+		},
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.handleAssociate(context.Background(), server, req)
+	}()
+
+	// Wait for the server to send the success reply
+	reply := make([]byte, 10)
+	client.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	_, err := client.Read(reply)
+	if err != nil {
+		t.Fatalf("failed to read reply: %v", err)
+	}
+	if reply[1] != successReply {
+		t.Fatalf("expected success reply, got %v", reply[1])
+	}
+
+	// The server should now be blocking in handleAssociate
+	select {
+	case err := <-errCh:
+		t.Fatalf("handleAssociate returned prematurely: %v", err)
+	case <-time.After(100 * time.Millisecond):
+		// Success, it's still blocking
+	}
+
+	// Now close the client connection
+	client.Close()
+
+	// handleAssociate should now return
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("handleAssociate returned error: %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("handleAssociate did not return after client closure")
+	}
+}
+
+func TestHandleAssociate_WithData(t *testing.T) {
+	s, _ := New(&Config{})
+
+	client, server := net.Pipe()
+
+	req := &Request{
+		Version: socks5Version,
+		Command: AssociateCommand,
+		DestAddr: &AddrSpec{
+			IP:   net.ParseIP("127.0.0.1"),
+			Port: 1234,
+		},
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.handleAssociate(context.Background(), server, req)
+	}()
+
+	// Read reply
+	reply := make([]byte, 10)
+	client.Read(reply)
+
+	// Send some data from client (which it shouldn't, but we should handle it)
+	go func() {
+		client.Write([]byte("some data"))
+		time.Sleep(50 * time.Millisecond)
+		client.Close()
+	}()
+
+	// handleAssociate should still return only after closure
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("handleAssociate returned error: %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("handleAssociate did not return after client closure")
 	}
 }
