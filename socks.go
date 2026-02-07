@@ -28,7 +28,7 @@ type Config struct {
 	Credentials CredentialStore
 
 	// Resolver can be provided to do custom name resolution.
-	// Defaults to DNSResolver if not provided.
+	// If not provided, the name will be passed to the dialer.
 	Resolver NameResolver
 
 	// Rules is provided to enable custom logic around permitting
@@ -43,7 +43,7 @@ type Config struct {
 	// BindIP is used for bind or udp associate
 	BindIP net.IP
 
-	// BindIP is used for bind or udp associate
+	// BindPort is used for bind or udp associate
 	BindPort int
 
 	// Logger can be used to provide a custom log target.

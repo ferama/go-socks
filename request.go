@@ -6,7 +6,6 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"time"
 
 	"golang.org/x/net/context"
 )
@@ -60,6 +59,11 @@ func (a *AddrSpec) String() string {
 // address, fallback to FQDN
 func (a AddrSpec) Address() string {
 	if len(a.IP) != 0 {
+		// In SOCKS 4a, the IP is 0.0.0.x where x is non-zero.
+		// If we have a FQDN, we should use it instead of the 0.0.0.x IP.
+		if a.FQDN != "" && a.IP[0] == 0 && a.IP[1] == 0 && a.IP[2] == 0 && a.IP[3] != 0 {
+			return net.JoinHostPort(a.FQDN, strconv.Itoa(a.Port))
+		}
 		return net.JoinHostPort(a.IP.String(), strconv.Itoa(a.Port))
 	}
 	return net.JoinHostPort(a.FQDN, strconv.Itoa(a.Port))
@@ -121,7 +125,7 @@ func NewRequest(bufConn io.Reader, reqVersion byte) (*Request, error) {
 		}
 
 		// Ensure we are compatible
-		if header[0] != 1 {
+		if header[0] != ConnectCommand && header[0] != BindCommand {
 			return nil, fmt.Errorf("unsupported command: %v", header[0])
 		}
 		request.Command = header[0]
@@ -294,17 +298,11 @@ func (s *Server) handleAssociate(ctx context.Context, conn net.Conn, req *Reques
 	}
 
 	// wait here till the client close the connection
-	// check every 10 secs
-	tmp := []byte{}
-	var neverTimeout time.Time
+	tmp := make([]byte, 1)
 	for {
-		conn.SetReadDeadline(time.Now())
-		if _, err := conn.Read(tmp); err == io.EOF {
+		if _, err := conn.Read(tmp); err != nil {
 			break
-		} else {
-			conn.SetReadDeadline(neverTimeout)
 		}
-		time.Sleep(10 * time.Second)
 	}
 
 	return nil
@@ -451,7 +449,13 @@ func sendReply(w io.Writer, resp uint8, addr *AddrSpec, version byte) error {
 		} else {
 			msg[1] = 0x5b
 		}
-		// bytes 3-8 are reserved
+		if addr != nil {
+			msg[2] = byte(addr.Port >> 8)
+			msg[3] = byte(addr.Port & 0xff)
+			if addr.IP.To4() != nil {
+				copy(msg[4:], addr.IP.To4())
+			}
+		}
 	default:
 		return fmt.Errorf("unsupported socks version: %d", version)
 	}
